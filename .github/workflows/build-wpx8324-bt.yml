@@ -61,65 +61,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v8-
 
-      - name: 7. Injeksi Kode
+      - name: 7. Terapkan PR dari sib0ndt
         working-directory: ./openwrt
         run: |
           echo "BUILD_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
           
-          git checkout ${{ github.event.inputs.openwrt_version }}
+          git config user.email "bot@github.actions"
+          git config user.name "GitHub Actions Bot"
           
-          # Buat folder struktur target
-          mkdir -p target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/
-          mkdir -p files/etc/hotplug.d/firmware/
-          
-          # 1. Download Full DTS
-          wget -qO target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq5018-wpx8324.dts "https://raw.githubusercontent.com/sib0ndt/openwrt/wpx8324/target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq5018-wpx8324.dts"
-          
-          # 2. Injeksi Profil wpx8324_ap-mp03-5-c1 ke ipq50xx.mk
-          cat << 'EOF' >> target/linux/qualcommax/image/ipq50xx.mk
+          git remote add sib0ndt https://github.com/sib0ndt/openwrt.git
+          git fetch sib0ndt wpx8324
 
-          define Device/wpx8324_ap-mp03-5-c1
-            $(call Device/FitImageLzma)
-            $(call Device/UbiFit)
-            DEVICE_VENDOR := Lite-on
-            DEVICE_MODEL := WPX8324
-            DEVICE_DTS := ipq5018-wpx8324
-            DEVICE_DTS_CONFIG := config@mp03.5-c1
-            SOC := ipq5018
-            BLOCKSIZE := 128k
-            PAGESIZE := 2048
-            IMAGE_SIZE := 59392k
-            NAND_SIZE := 128m
-            DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-yuncore_ax830 kmod-usb-dwc3-qcom kmod-usb-storage kmod-fs-vfat block-mount usbutils
-          endef
-          TARGET_DEVICES += wpx8324_ap-mp03-5-c1
-          EOF
+          git merge --no-edit sib0ndt/wpx8324
           
-          # 3. Injeksi Skrip Caldata WiFi
-          cat << 'EOF' > files/etc/hotplug.d/firmware/11-ath11k-caldata
-          #!/bin/sh
-          [ -e /lib/firmware/$FIRMWARE ] && exit 0
-          . /lib/functions/caldata.sh
-          board=$(board_name)
-          case "$board" in
-          wpx8324,ap-mp03-5-c1)
-              caldata_extract "0:ART" 0x1000 0x20000
-              ath11k_remove_regdomain
-              ath11k_set_macflag
-              ;;
-          esac
-          EOF
-
-          # 4. Suntik Dukungan Sysupgrade
-          sed -i 's/yuncore,ax830|\\/wpx8324,ap-mp03-5-c1|\\\n\tyuncore,ax830|\\/g' target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh
-
-          # 5. Suntik Konfigurasi Network Dasar
-          sed -i '/yuncore,ax850)/i \\twpx8324,ap-mp03-5-c1)\n\t\tucidef_set_interfaces_lan_wan "lan" "wan"\n\t\t;;\n' target/linux/qualcommax/ipq50xx/base-files/etc/board.d/02_network
-
-          # 6. Suntik Konfigurasi U-Boot Env Tools
-          sed -i 's/yuncore,ax830|\\/wpx8324,ap-mp03-5-c1|\\\n\tyuncore,ax830|\\/g' package/boot/uboot-tools/uboot-envtools/files/qualcommax_ipq50xx
-          
-          # Perbarui feeds OpenWrt
           for i in 1 2 3; do
             ./scripts/feeds update -a && break || sleep 60
           done
