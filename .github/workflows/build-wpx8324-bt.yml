@@ -26,7 +26,7 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: 1. Checkout Kode Repositori (Mengambil repo kamu)
+      - name: 1. Checkout Kode Repositori
         uses: actions/checkout@v4
 
       - name: 2. Siapkan Variabel Build
@@ -50,15 +50,15 @@ jobs:
       - name: 5. Clone Repositori OpenWrt
         run: git clone https://github.com/openwrt/openwrt.git ./openwrt
 
-      - name: 6. Atur Cache Build (Nuke Cache v12)
+      - name: 6. Atur Cache Build (Nuke Cache v13)
         uses: actions/cache@v4
         with:
           path: |
             openwrt/dl
             openwrt/.ccache
-          key: ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v12
+          key: ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v13
           restore-keys: |
-            ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v12-
+            ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v13-
 
       - name: 7. Injeksi Kode (Jalur Mandiri File Lokal)
         working-directory: ./openwrt
@@ -67,15 +67,12 @@ jobs:
           
           git checkout ${{ github.event.inputs.openwrt_version }}
           
-          # Buat direktori target
           mkdir -p target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/
           mkdir -p files/etc/hotplug.d/firmware/
           
-          # 1. Salin file dari folder custom-files di repositorimu!
           cp $GITHUB_WORKSPACE/custom-files/ipq5018-wpx8324.dts target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/
           cp $GITHUB_WORKSPACE/custom-files/11-ath11k-caldata files/etc/hotplug.d/firmware/
           
-          # 2. Injeksi Profil ipq50xx.mk (Aman, hanya menambah bukan menimpa)
           cat << 'EOF' >> target/linux/qualcommax/image/ipq50xx.mk
 
           define Device/wpx8324_ap-mp03-5-c1
@@ -95,22 +92,45 @@ jobs:
           TARGET_DEVICES += wpx8324_ap-mp03-5-c1
           EOF
 
-          # 3. Suntik Dukungan Sysupgrade
           sed -i 's/yuncore,ax830|\\/wpx8324,ap-mp03-5-c1|\\\n\tyuncore,ax830|\\/g' target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh
-
-          # 4. Suntik Konfigurasi Network Dasar
           sed -i 's/yuncore,ax850)/wpx8324,ap-mp03-5-c1)\n\t\tucidef_set_interfaces_lan_wan "lan" "wan"\n\t\t;;\n\tyuncore,ax850)/g' target/linux/qualcommax/ipq50xx/base-files/etc/board.d/02_network
-
-          # 5. Suntik Konfigurasi U-Boot Env Tools
           sed -i 's/yuncore,ax830|\\/wpx8324,ap-mp03-5-c1|\\\n\tyuncore,ax830|\\/g' package/boot/uboot-tools/uboot-envtools/files/qualcommax_ipq50xx
           
-          # Perbarui feeds OpenWrt
           for i in 1 2 3; do
             ./scripts/feeds update -a && break || sleep 60
           done
           ./scripts/feeds install -a
 
-      - name: 8. Konfigurasi First Boot (uci-defaults)
+      - name: 8. Sinkronisasi Vermagic Kernel (Dukungan Official kmod)
+        working-directory: ./openwrt
+        run: |
+          VERSION="${{ github.event.inputs.openwrt_version }}"
+          VERSION_NUM=$(echo "$VERSION" | sed 's/^v//')
+          
+          if [[ "$VERSION" != "snapshot" ]]; then
+            KMODS_URL="https://downloads.openwrt.org/releases/${VERSION_NUM}/targets/qualcommax/ipq50xx/kmods/"
+            PACKAGES_URL="https://downloads.openwrt.org/releases/${VERSION_NUM}/targets/qualcommax/ipq50xx/packages/Packages"
+          else
+            KMODS_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/kmods/"
+            PACKAGES_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/packages/Packages"
+          fi
+          
+          FULL_KERNEL_VER=$(curl -sL "$KMODS_URL" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[a-f0-9]{32}' | head -n 1)
+          if [[ -z "$FULL_KERNEL_VER" ]]; then
+            FULL_KERNEL_VER=$(curl -sL "$PACKAGES_URL" | awk '/^Package: kernel$/{f=1} f && /^Version:/{print $2; exit}')
+          fi
+          
+          if [[ -n "$FULL_KERNEL_VER" ]]; then
+            VERMAGIC=$(echo "$FULL_KERNEL_VER" | awk -F'-' '{print $NF}')
+            echo "$VERMAGIC" > .vermagic
+            sed -i 's|grep '\''=\[ym\]'\'' $(LINUX_DIR)/.config.set \| LC_ALL=C sort \| $(MKHASH) md5 > $(LINUX_DIR)/.vermagic|cp $(TOPDIR)/.vermagic $(LINUX_DIR)/.vermagic|g' ./include/kernel-defaults.mk
+            sed -i 's|STAMP_BUILT:=$(STAMP_BUILT)_$(shell $(SCRIPT_DIR)/kconfig.pl $(LINUX_DIR)/.config \| $(MKHASH) md5)|STAMP_BUILT:=$(STAMP_BUILT)_$(shell cat $(LINUX_DIR)/.vermagic)|g' ./package/kernel/linux/Makefile
+            echo "✅ Berhasil menyuntikkan Vermagic Official: $VERMAGIC"
+          else
+            echo "⚠️ Peringatan: Gagal menemukan Vermagic dari server OpenWrt!"
+          fi
+
+      - name: 9. Konfigurasi First Boot (uci-defaults)
         working-directory: ./openwrt
         run: |
           mkdir -p files/etc/uci-defaults
@@ -140,7 +160,7 @@ jobs:
           EOF
           chmod +x files/etc/uci-defaults/99-custom-settings
 
-      - name: 9. Terapkan Konfigurasi Kustom (Packages & Profile Fix)
+      - name: 10. Terapkan Konfigurasi Kustom
         working-directory: ./openwrt
         run: |
           echo 'CONFIG_CCACHE=y' > .config
@@ -163,7 +183,7 @@ jobs:
           fi
           make defconfig
 
-      - name: 10. Mulai Proses Build
+      - name: 11. Mulai Proses Build
         working-directory: ./
         env:
           CCACHE_DIR: ${{ github.workspace }}/openwrt/.ccache
@@ -172,18 +192,18 @@ jobs:
           make -j$(nproc) -C openwrt download
           make -j$(nproc) -C openwrt world || make -j1 V=s -C openwrt world
 
-      - name: 11. Unggah Artefak Build
+      - name: 12. Unggah Artefak Build
         uses: actions/upload-artifact@v4
         with:
           name: WPX8324-Firmware-${{ github.event.inputs.openwrt_version }}-${{ env.BUILD_DATE }}
           path: ./openwrt/bin/targets/qualcommax/ipq50xx/*wpx8324*
 
-      - name: 12. Kumpulkan Berkas untuk Rilis
+      - name: 13. Kumpulkan Berkas untuk Rilis
         run: |
           mkdir -p ./release_files
           find ./openwrt/bin/targets/qualcommax/ipq50xx/ -type f -name "*wpx8324*" -exec cp {} ./release_files/ \; 2>/dev/null || true
 
-      - name: 13. Kirim Berkas ke GitHub Release
+      - name: 14. Kirim Berkas ke GitHub Release
         uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
