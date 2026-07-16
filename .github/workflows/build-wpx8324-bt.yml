@@ -50,15 +50,15 @@ jobs:
       - name: 5. Clone Repositori OpenWrt
         run: git clone https://github.com/openwrt/openwrt.git ./openwrt
 
-      - name: 6. Atur Cache Build (Nuke Cache v14)
+      - name: 6. Atur Cache Build (Nuke Cache v18)
         uses: actions/cache@v4
         with:
           path: |
             openwrt/dl
             openwrt/.ccache
-          key: ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v14
+          key: ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v18
           restore-keys: |
-            ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v14-
+            ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v18-
 
       - name: 7. Injeksi Kode (Jalur Mandiri File Lokal)
         working-directory: ./openwrt
@@ -101,7 +101,7 @@ jobs:
           done
           ./scripts/feeds install -a
 
-      - name: 8. Sinkronisasi Vermagic Kernel (Dukungan Official kmod)
+      - name: 8. Sinkronisasi Vermagic Kernel (Aman untuk APK)
         working-directory: ./openwrt
         run: |
           VERSION="${{ github.event.inputs.openwrt_version }}"
@@ -123,13 +123,12 @@ jobs:
           if [[ -n "$FULL_KERNEL_VER" ]]; then
             VERMAGIC=$(echo "$FULL_KERNEL_VER" | awk -F'-' '{print $NF}')
             echo "$VERMAGIC" > .vermagic
-            # HANYA modifikasi kernel-defaults.mk, JANGAN ubah package/kernel/linux/Makefile
             sed -i 's|grep '\''=\[ym\]'\'' $(LINUX_DIR)/.config.set \| LC_ALL=C sort \| $(MKHASH) md5 > $(LINUX_DIR)/.vermagic|cp $(TOPDIR)/.vermagic $(LINUX_DIR)/.vermagic|g' ./include/kernel-defaults.mk
             echo "✅ Berhasil menyuntikkan Vermagic Official: $VERMAGIC"
           else
             echo "⚠️ Peringatan: Gagal menemukan Vermagic dari server OpenWrt!"
           fi
-          
+
       - name: 9. Konfigurasi First Boot (uci-defaults)
         working-directory: ./openwrt
         run: |
@@ -168,7 +167,7 @@ jobs:
           echo 'CONFIG_TARGET_qualcommax_ipq50xx=y' >> .config
           echo '# CONFIG_TARGET_qualcommax_ipq807x is not set' >> .config
           echo 'CONFIG_TARGET_MULTI_PROFILE=y' >> .config
-          echo 'CONFIG_TARGET_DEVICE_qualcommax_ipq50xx_DEVICE_wpx8324_ap_mp03_5_c1=y' >> .config
+          echo 'CONFIG_TARGET_DEVICE_qualcommax_ipq50xx_DEVICE_wpx8324_ap-mp03-5-c1=y' >> .config
           
           CUSTOM_PKGS="${{ github.event.inputs.custom_packages }}"
           if [ -n "$CUSTOM_PKGS" ]; then
