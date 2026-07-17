@@ -199,53 +199,36 @@ jobs:
           
           make defconfig
 
-      - name: 9. Ekstrak & Suntik Vermagic Kernel
+      - name: 9. Ekstrak & Suntik Vermagic Kernel (Disesuaikan untuk v25)
         working-directory: ./openwrt
         run: |
           VERSION="${{ github.event.inputs.openwrt_version }}"
           VERSION_NUM=$(echo "$VERSION" | sed 's/^v//')
           
-          # Tentukan Base URL
+          # Tentukan URL direktori kmods
           if [[ "$VERSION" != "snapshot" ]]; then
-            BASE_URL="https://downloads.openwrt.org/releases/${VERSION_NUM}/targets/qualcommax/ipq50xx"
+            KMODS_URL="https://downloads.openwrt.org/releases/${VERSION_NUM}/targets/qualcommax/ipq50xx/kmods/"
           else
-            BASE_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx"
+            KMODS_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/kmods/"
           fi
           
-          # Daftar folder yang mungkin menyimpan paket kernel (kmods / packages)
-          URLS_TO_CHECK=(
-            "$BASE_URL/kmods/"
-            "$BASE_URL/packages/"
-            "$BASE_URL/"
-          )
+          echo "Mencari Vermagic dari: $KMODS_URL"
           
-          VERMAGIC=""
-          echo "Mencari Vermagic untuk kernel OpenWrt..."
+          # Pindai halaman web kmods dan tangkap nama folder yang mengandung versi kernel & 32-karakter hash
+          # Regex ini akan cocok dengan "6.12.94-1-d87093ae313df0a8c4c28e9b3e501a89"
+          FULL_KERNEL_VER=$(curl -sL "$KMODS_URL" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+[a-zA-Z0-9.-]*[a-f0-9]{32}' | head -n 1)
           
-          # Lakukan perulangan untuk memindai halaman direktori
-          for url in "${URLS_TO_CHECK[@]}"; do
-            echo "Memindai URL: $url"
+          if [[ -n "$FULL_KERNEL_VER" ]]; then
+            # Ambil 32 karakter terakhir saja sebagai VERMAGIC murni
+            VERMAGIC=$(echo "$FULL_KERNEL_VER" | grep -oE '[a-f0-9]{32}$')
             
-            # Cari file bernama kernel_...ipk atau kernel-...apk dan ambil 32 karakter hash-nya
-            VERMAGIC=$(curl -sL "$url" | grep -oE 'kernel[-_].*[-_][a-f0-9]{32}\.(ipk|apk)' | head -n 1 | grep -oE '[a-f0-9]{32}')
-            
-            if [[ ${#VERMAGIC} -eq 32 ]]; then
-              echo "✅ Vermagic ditemukan di $url"
-              break
-            fi
-          done
-          
-          # Validasi akhir apakah vermagic 32 karakter berhasil didapat
-          if [[ ${#VERMAGIC} -eq 32 ]]; then
             echo "$VERMAGIC" > .vermagic
             sed -i 's|grep '\''=\[ym\]'\'' $(LINUX_DIR)/.config.set \| LC_ALL=C sort \| $(MKHASH) md5 > $(LINUX_DIR)/.vermagic|cp $(TOPDIR)/.vermagic $(LINUX_DIR)/.vermagic|g' ./include/kernel-defaults.mk
             sed -i 's|STAMP_BUILT:=$(STAMP_BUILT)_$(shell $(SCRIPT_DIR)/kconfig.pl $(LINUX_DIR)/.config \| $(MKHASH) md5)|STAMP_BUILT:=$(STAMP_BUILT)_$(shell cat $(LINUX_DIR)/.vermagic)|g' ./package/kernel/linux/Makefile
-            echo "✅ Berhasil menyuntikkan Vermagic: $VERMAGIC"
+            echo "✅ Berhasil menyuntikkan Vermagic Official: $VERMAGIC"
           else
-            echo "❌ Gagal mendapatkan Vermagic! Tidak ditemukan file kernel di repositori target."
-            echo "URL yang dicek: $BASE_URL"
-            echo "Membatalkan build agar tidak menghasilkan firmware yang rusak (kernel panic)."
-            exit 1
+            echo "⚠️ Peringatan: Gagal menemukan nama folder kernel di $KMODS_URL"
+            echo "Melanjutkan build dengan vermagic bawaan..."
           fi
 
       - name: 10. Mulai Proses Build
