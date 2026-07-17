@@ -1,4 +1,4 @@
-name: 'Build OpenWrt WPX8324-BT V2'
+name: 'Build OpenWrt WPX8324-BT'
 
 permissions:
   contents: write
@@ -20,7 +20,7 @@ on:
         description: 'Daftar Paket Tambahan'
         required: false
         type: string
-        default: 'luci luci-ssl kmod-usb-net kmod-usb-net-qmi-wwan uqmi luci-proto-qmi kmod-usb-serial-option kmod-usb-serial kmod-usb-serial-wwan qmi-utils kmod-usb-acm kmod-usb-net-cdc-ncm kmod-usb-net-cdc-mbim umbim modemmanager luci-app-modemmanager usbutils iperf3 nano htop'
+        default: 'luci luci-ssl kmod-usb-net kmod-usb-net-rndis kmod-usb-net-qmi-wwan uqmi luci-proto-qmi kmod-usb-serial-option kmod-usb-serial kmod-usb-serial-wwan qmi-utils kmod-usb-acm kmod-usb-net-cdc-ncm kmod-usb-net-cdc-mbim umbim modemmanager luci-app-modemmanager usbutils iperf3 nano htop'
 
 jobs:
   build:
@@ -50,15 +50,15 @@ jobs:
       - name: 5. Clone Repositori OpenWrt
         run: git clone https://github.com/openwrt/openwrt.git ./openwrt
 
-      - name: 6. Atur Cache Build (Nuke Cache v20)
+      - name: 6. Atur Cache Build (Nuke Cache v21)
         uses: actions/cache@v4
         with:
           path: |
             openwrt/dl
             openwrt/.ccache
-          key: ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v20
+          key: ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v21
           restore-keys: |
-            ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v20-
+            ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v21-
 
       - name: 7. Injeksi Kode & Paksa Custom Packages ke RootFS
         working-directory: ./openwrt
@@ -75,6 +75,7 @@ jobs:
           
           CUSTOM_PKGS="${{ github.event.inputs.custom_packages }} -kmod-qrtr -kmod-qrtr-smd -kmod-qrtr-tun"
           
+          # Tanda \ pada $CUSTOM_PKGS SUDAH DIHAPUS agar Bash menyisipkan teks paketnya secara langsung!
           cat << EOF >> target/linux/qualcommax/image/ipq50xx.mk
 
           define Device/wpx8324_ap-mp03-5-c1
@@ -89,7 +90,7 @@ jobs:
             PAGESIZE := 2048
             IMAGE_SIZE := 59392k
             NAND_SIZE := 128m
-            DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-yuncore_ax830 kmod-usb-dwc3-qcom kmod-usb-storage kmod-fs-vfat block-mount usbutils \$CUSTOM_PKGS
+            DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-yuncore_ax830 kmod-usb-dwc3-qcom kmod-usb-storage kmod-fs-vfat block-mount usbutils ${CUSTOM_PKGS}
           endef
           TARGET_DEVICES += wpx8324_ap-mp03-5-c1
           EOF
@@ -103,7 +104,7 @@ jobs:
           done
           ./scripts/feeds install -a
 
-      - name: 8. Sinkronisasi Vermagic Kernel (Dukungan Official kmod Penuh)
+      - name: 8. Sinkronisasi Vermagic Kernel
         working-directory: ./openwrt
         run: |
           VERSION="${{ github.event.inputs.openwrt_version }}"
@@ -125,7 +126,6 @@ jobs:
           if [[ -n "$FULL_KERNEL_VER" ]]; then
             VERMAGIC=$(echo "$FULL_KERNEL_VER" | awk -F'-' '{print $NF}')
             echo "$VERMAGIC" > .vermagic
-            # Modifikasi kernel-defaults.mk dan STAMP_BUILT untuk memalsukan identitas kernel secara total
             sed -i 's|grep '\''=\[ym\]'\'' $(LINUX_DIR)/.config.set \| LC_ALL=C sort \| $(MKHASH) md5 > $(LINUX_DIR)/.vermagic|cp $(TOPDIR)/.vermagic $(LINUX_DIR)/.vermagic|g' ./include/kernel-defaults.mk
             sed -i 's|STAMP_BUILT:=$(STAMP_BUILT)_$(shell $(SCRIPT_DIR)/kconfig.pl $(LINUX_DIR)/.config \| $(MKHASH) md5)|STAMP_BUILT:=$(STAMP_BUILT)_$(shell cat $(LINUX_DIR)/.vermagic)|g' ./package/kernel/linux/Makefile
             echo "✅ Berhasil menyuntikkan Vermagic Official secara penuh: $VERMAGIC"
@@ -133,37 +133,42 @@ jobs:
             echo "⚠️ Peringatan: Gagal menemukan Vermagic dari server OpenWrt!"
           fi
 
-      - name: 9. Konfigurasi First Boot
+      - name: 9. Konfigurasi First Boot (Jeda Background)
         working-directory: ./openwrt
         run: |
           mkdir -p files/etc/uci-defaults
           cat << 'EOF' > files/etc/uci-defaults/99-custom-settings
           #!/bin/sh
           
-          [ -f /etc/config/wireless ] || wifi config
-          
-          uci set system.@system[0].timezone='WIB-7'
-          uci set system.@system[0].zonename='Asia/Jakarta'
-          uci set system.@system[0].hostname='WPX8324-BT'
-          uci commit system
-          
-          uci set wireless.default_radio0.ssid='WPX8324-BT'
-          uci set wireless.radio0.country='ID'
-          uci set wireless.radio0.disabled='0'
-          uci set wireless.radio0.channel='auto'
-          
-          if uci get wireless.radio1 > /dev/null 2>&1; then
-            uci set wireless.default_radio1.ssid='WPX8324-BT 5G'
-            uci set wireless.radio1.disabled='0'
-            uci set wireless.radio1.channel='auto'
-          fi
-          uci commit wireless
-          
-          sed -i -e '/12d1:15c1/,+5d' /etc/usb-mode.json
-          sed -i -e '/413c:81d7/,+5d' /etc/usb-mode.json
-          
-          wifi reload
-          wifi up
+          (
+            sleep 20
+            [ -f /etc/config/wireless ] || wifi config
+            
+            uci set system.@system[0].timezone='WIB-7'
+            uci set system.@system[0].zonename='Asia/Jakarta'
+            uci set system.@system[0].hostname='WPX8324-BT'
+            uci commit system
+            
+            if uci get wireless.radio0 > /dev/null 2>&1; then
+              uci set wireless.default_radio0.ssid='WPX8324-BT'
+              uci set wireless.radio0.country='ID'
+              uci set wireless.radio0.disabled='0'
+              uci set wireless.radio0.channel='auto'
+            fi
+            
+            if uci get wireless.radio1 > /dev/null 2>&1; then
+              uci set wireless.default_radio1.ssid='WPX8324-BT 5G'
+              uci set wireless.radio1.disabled='0'
+              uci set wireless.radio1.channel='auto'
+            fi
+            uci commit wireless
+            
+            sed -i -e '/12d1:15c1/,+5d' /etc/usb-mode.json
+            sed -i -e '/413c:81d7/,+5d' /etc/usb-mode.json
+            
+            wifi reload
+            wifi up
+          ) &
           exit 0
           EOF
           chmod +x files/etc/uci-defaults/99-custom-settings
