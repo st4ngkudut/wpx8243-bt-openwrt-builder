@@ -20,7 +20,7 @@ on:
         description: 'Daftar Paket Tambahan (Gunakan tanda minus "-" untuk menghapus paket)'
         required: false
         type: string
-        default: 'luci luci-ssl kmod-usb-net kmod-usb-net-qmi-wwan uqmi luci-proto-qmi kmod-usb-serial-option kmod-usb-serial kmod-usb-serial-wwan qmi-utils kmod-usb-acm kmod-usb-net-cdc-ncm kmod-usb-net-cdc-mbim umbim modemmanager luci-app-modemmanager usbutils iperf3 nano htop'
+        default: 'luci luci-ssl kmod-mii kmod-usb-net kmod-usb-wdm kmod-usb-net-qmi-wwan uqmi luci-proto-qmi kmod-usb-net-cdc-ether kmod-usb-serial-option kmod-usb-serial kmod-usb-serial-wwan qmi-utils kmod-usb-serial-qualcomm kmod-usb-acm kmod-usb-net-cdc-ncm kmod-usb-net-cdc-mbim umbim modemmanager luci-proto-modemmanager usbutils iperf3 usb-modeswitch kmod-usb-net-rndis nano htop pv openssh-sftp-server'
 
 jobs:
   build:
