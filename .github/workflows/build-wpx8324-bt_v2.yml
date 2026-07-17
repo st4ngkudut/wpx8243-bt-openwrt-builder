@@ -1,4 +1,4 @@
-name: 'Build OpenWrt WPX8324-BT V2'
+name: 'Build OpenWrt WPX8324-BT'
 
 permissions:
   contents: write
@@ -11,16 +11,16 @@ on:
         description: 'Pilih Versi/Branch OpenWrt'
         required: true
         type: choice
-        default: 'snapshot'
+        default: 'v25.12.5'
         options:
           - 'snapshot'
           - 'v25.12.5'
           - 'v25.12.4'
       custom_packages:
-        description: 'Daftar Paket Tambahan (Opsional, gunakan "-" untuk menghapus paket)'
+        description: 'Daftar Paket Tambahan (Gunakan tanda minus "-" untuk menghapus paket)'
         required: false
         type: string
-        default: ''
+        default: 'luci luci-ssl kmod-usb-net kmod-usb-net-qmi-wwan uqmi luci-proto-qmi kmod-usb-serial-option kmod-usb-serial kmod-usb-serial-wwan qmi-utils kmod-usb-acm kmod-usb-net-cdc-ncm kmod-usb-net-cdc-mbim umbim modemmanager luci-app-modemmanager usbutils iperf3 nano htop'
 
 jobs:
   build:
@@ -45,57 +45,75 @@ jobs:
           sudo apt-get install -y \
             build-essential clang flex bison g++ gawk gcc-multilib gettext \
             git libncurses5-dev libssl-dev python3-setuptools rsync unzip \
-            zlib1g-dev file wget ccache curl zstd
+            zlib1g-dev file wget ccache curl
 
       - name: 5. Clone Repositori OpenWrt
         run: git clone https://github.com/openwrt/openwrt.git ./openwrt
 
-      - name: 6. Atur Cache Build
+      - name: 6. Atur Cache Build (Nuke Cache v18)
         uses: actions/cache@v4
         with:
           path: |
             openwrt/dl
             openwrt/.ccache
-          key: ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v1
+          key: ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v18
           restore-keys: |
-            ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v1-
+            ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v18-
 
-      - name: 7. Terapkan Pull Request #24227 (Anti-Gagal)
+      - name: 7. Injeksi Kode (Jalur Mandiri File Lokal)
         working-directory: ./openwrt
         run: |
           echo "BUILD_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
           
-          # Tangani perbedaan nama branch "snapshot" ke "main" di Git
-          if [ "${{ github.event.inputs.openwrt_version }}" == "snapshot" ]; then
-            git checkout main
-          else
-            git checkout ${{ github.event.inputs.openwrt_version }}
-          fi
+          git checkout ${{ github.event.inputs.openwrt_version }}
           
-          echo "Menerapkan Pull Request #24227 (Lite-On WPX8324)..."
-          curl -sL https://github.com/openwrt/openwrt/pull/24227.patch > pr24227.patch
+          mkdir -p target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/
+          mkdir -p files/etc/hotplug.d/firmware/
           
-          # Gunakan patch -p1 sebagai fallback paling aman jika git apply konflik whitespace
-          git apply --3way pr24227.patch || patch -p1 < pr24227.patch || echo "⚠️ Beberapa patch mungkin gagal diterapkan (Cek Log)"
+          cp $GITHUB_WORKSPACE/custom-files/ipq5018-wpx8324.dts target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/
+          cp $GITHUB_WORKSPACE/custom-files/11-ath11k-caldata files/etc/hotplug.d/firmware/
           
-          # Update dan install feeds
+          # Memasukkan input custom_packages langsung ke dalam DEVICE_PACKAGES agar wajib terinstal
+          cat << EOF >> target/linux/qualcommax/image/ipq50xx.mk
+
+          define Device/wpx8324_ap-mp03-5-c1
+            \$(call Device/FitImageLzma)
+            \$(call Device/UbiFit)
+            DEVICE_VENDOR := Lite-On
+            DEVICE_MODEL := WPX8324
+            DEVICE_DTS := ipq5018-wpx8324
+            DEVICE_DTS_CONFIG := config@mp03.5-c1
+            SOC := ipq5018
+            BLOCKSIZE := 128k
+            PAGESIZE := 2048
+            IMAGE_SIZE := 59392k
+            NAND_SIZE := 128m
+            DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-yuncore_ax830 kmod-ath11k-pci kmod-usb-dwc3-qcom kmod-usb-storage kmod-fs-vfat block-mount usbutils ${{ github.event.inputs.custom_packages }}
+          endef
+          TARGET_DEVICES += wpx8324_ap-mp03-5-c1
+          EOF
+
+          sed -i 's/yuncore,ax830|\\/wpx8324,ap-mp03-5-c1|\\\n\tyuncore,ax830|\\/g' target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh
+          sed -i 's/yuncore,ax850)/wpx8324,ap-mp03-5-c1)\n\t\tucidef_set_interfaces_lan_wan "lan" "wan"\n\t\t;;\n\tyuncore,ax850)/g' target/linux/qualcommax/ipq50xx/base-files/etc/board.d/02_network
+          sed -i 's/yuncore,ax830|\\/wpx8324,ap-mp03-5-c1|\\\n\tyuncore,ax830|\\/g' package/boot/uboot-tools/uboot-envtools/files/qualcommax_ipq50xx
+          
           for i in 1 2 3; do
             ./scripts/feeds update -a && break || sleep 60
           done
           ./scripts/feeds install -a
 
-      - name: 8. Sinkronisasi Vermagic Kernel
+      - name: 8. Sinkronisasi Vermagic Kernel (Aman untuk APK)
         working-directory: ./openwrt
         run: |
           VERSION="${{ github.event.inputs.openwrt_version }}"
           VERSION_NUM=$(echo "$VERSION" | sed 's/^v//')
           
-          if [[ "$VERSION" == "snapshot" ]]; then
-            KMODS_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/kmods/"
-            PACKAGES_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/packages/Packages"
-          else
+          if [[ "$VERSION" != "snapshot" ]]; then
             KMODS_URL="https://downloads.openwrt.org/releases/${VERSION_NUM}/targets/qualcommax/ipq50xx/kmods/"
             PACKAGES_URL="https://downloads.openwrt.org/releases/${VERSION_NUM}/targets/qualcommax/ipq50xx/packages/Packages"
+          else
+            KMODS_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/kmods/"
+            PACKAGES_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/packages/Packages"
           fi
           
           FULL_KERNEL_VER=$(curl -sL "$KMODS_URL" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[a-f0-9]{32}' | head -n 1)
@@ -123,6 +141,10 @@ jobs:
           uci set system.@system[0].hostname='WPX8324-BT'
           uci commit system
           
+          # Hapus config wireless lama dan generate ulang agar 5GHz PCIe terdeteksi
+          rm -f /etc/config/wireless
+          wifi config
+          
           uci set wireless.default_radio0.ssid='WPX8324-BT'
           uci set wireless.radio0.country='ID'
           uci set wireless.radio0.disabled='0'
@@ -130,10 +152,12 @@ jobs:
           
           if uci get wireless.radio1 > /dev/null 2>&1; then
             uci set wireless.default_radio1.ssid='WPX8324-BT 5G'
+            uci set wireless.radio1.country='ID'
             uci set wireless.radio1.disabled='0'
             uci set wireless.radio1.channel='auto'
           fi
           uci commit wireless
+          
           sed -i -e '/12d1:15c1/,+5d' /etc/usb-mode.json
           sed -i -e '/413c:81d7/,+5d' /etc/usb-mode.json
           wifi reload
@@ -150,28 +174,7 @@ jobs:
           echo 'CONFIG_TARGET_qualcommax_ipq50xx=y' >> .config
           echo '# CONFIG_TARGET_qualcommax_ipq807x is not set' >> .config
           echo 'CONFIG_TARGET_MULTI_PROFILE=y' >> .config
-          
-          # PASTIKAN ID INI SAMA DENGAN NAMA DEVICE DI DALAM PR #24227
           echo 'CONFIG_TARGET_DEVICE_qualcommax_ipq50xx_DEVICE_wpx8324_ap-mp03-5-c1=y' >> .config
-          
-          # --- DAFTAR PAKET WAJIB (Akan selalu diinstal) ---
-          DEFAULT_PKGS="luci luci-ssl kmod-usb-net kmod-usb-net-qmi-wwan uqmi luci-proto-qmi kmod-usb-serial-option kmod-usb-serial kmod-usb-serial-wwan qmi-utils kmod-usb-acm kmod-usb-net-cdc-ncm kmod-usb-net-cdc-mbim umbim modemmanager luci-app-modemmanager usbutils iperf3 nano htop"
-          for pkg in $DEFAULT_PKGS; do
-            echo "CONFIG_PACKAGE_$pkg=y" >> .config
-          done
-          
-          # --- DAFTAR PAKET TAMBAHAN (Dari Input Opsional) ---
-          CUSTOM_PKGS="${{ github.event.inputs.custom_packages }}"
-          if [ -n "$CUSTOM_PKGS" ]; then
-            for pkg in $CUSTOM_PKGS; do
-              if [[ $pkg == -* ]]; then
-                clean_pkg="${pkg#-}"
-                echo "# CONFIG_PACKAGE_$clean_pkg is not set" >> .config
-              else
-                echo "CONFIG_PACKAGE_$pkg=y" >> .config
-              fi
-            done
-          fi
           make defconfig
 
       - name: 11. Mulai Proses Build
