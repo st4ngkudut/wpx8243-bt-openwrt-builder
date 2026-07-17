@@ -1,4 +1,4 @@
-name: 'Build OpenWrt WPX8324-BT'
+name: 'Build OpenWrt WPX8324-BT v2'
 
 permissions:
   contents: write
@@ -117,19 +117,28 @@ jobs:
             PACKAGES_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/packages/Packages"
           fi
           
+          echo "Mencari versi kernel dan vermagic di: $KMODS_URL"
+          
           FULL_KERNEL_VER=$(curl -sL "$KMODS_URL" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[a-f0-9]{32}' | head -n 1)
+          
           if [[ -z "$FULL_KERNEL_VER" ]]; then
+            echo "Folder kmods tidak ditemukan, membaca dari index Packages..."
             FULL_KERNEL_VER=$(curl -sL "$PACKAGES_URL" | awk '/^Package: kernel$/{f=1} f && /^Version:/{print $2; exit}')
           fi
           
-          if [[ -n "$FULL_KERNEL_VER" ]]; then
-            VERMAGIC=$(echo "$FULL_KERNEL_VER" | awk -F'-' '{print $NF}')
-            echo "$VERMAGIC" > .vermagic
-            sed -i 's|grep '\''=\[ym\]'\'' $(LINUX_DIR)/.config.set \| LC_ALL=C sort \| $(MKHASH) md5 > $(LINUX_DIR)/.vermagic|cp $(TOPDIR)/.vermagic $(LINUX_DIR)/.vermagic|g' ./include/kernel-defaults.mk
-            echo "✅ Berhasil menyuntikkan Vermagic Official: $VERMAGIC"
-          else
-            echo "⚠️ Peringatan: Gagal menemukan Vermagic dari server OpenWrt!"
+          if [[ -z "$FULL_KERNEL_VER" ]]; then
+            echo "::error::Gagal mengambil informasi kernel dari server OpenWrt!"
+            exit 1
           fi
+          
+          VERMAGIC=$(echo "$FULL_KERNEL_VER" | awk -F'-' '{print $NF}')
+          echo "$VERMAGIC" > .vermagic
+          
+          sed -i 's|grep '\''=\[ym\]'\'' $(LINUX_DIR)/.config.set \| LC_ALL=C sort \| $(MKHASH) md5 > $(LINUX_DIR)/.vermagic|cp $(TOPDIR)/.vermagic $(LINUX_DIR)/.vermagic|g' ./include/kernel-defaults.mk
+          sed -i 's|STAMP_BUILT:=$(STAMP_BUILT)_$(shell $(SCRIPT_DIR)/kconfig.pl $(LINUX_DIR)/.config \| $(MKHASH) md5)|STAMP_BUILT:=$(STAMP_BUILT)_$(shell cat $(LINUX_DIR)/.vermagic)|g' ./package/kernel/linux/Makefile
+          
+          echo "✅ Full Kernel String: $FULL_KERNEL_VER"
+          echo "✅ Berhasil menyuntikkan Vermagic Official: $VERMAGIC"
 
       - name: 9. Konfigurasi First Boot (uci-defaults)
         working-directory: ./openwrt
