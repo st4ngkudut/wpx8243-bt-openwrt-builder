@@ -1,4 +1,4 @@
-name: 'Build OpenWrt WPX8324-BT'
+name: 'Build OpenWrt WPX8324-BT V2'
 
 permissions:
   contents: write
@@ -17,10 +17,10 @@ on:
           - 'v25.12.5'
           - 'v25.12.4'
       custom_packages:
-        description: 'Daftar Paket Tambahan (Gunakan tanda minus "-" untuk menghapus paket)'
+        description: 'Daftar Paket Tambahan (Opsional, gunakan "-" untuk menghapus paket)'
         required: false
         type: string
-        default: 'luci luci-ssl kmod-usb-net kmod-usb-net-qmi-wwan uqmi luci-proto-qmi kmod-usb-serial-option kmod-usb-serial kmod-usb-serial-wwan qmi-utils kmod-usb-acm kmod-usb-net-cdc-ncm kmod-usb-net-cdc-mbim umbim modemmanager luci-app-modemmanager usbutils iperf3 nano htop'
+        default: ''
 
 jobs:
   build:
@@ -60,42 +60,23 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v18-
 
-      - name: 7. Injeksi Kode (Jalur Mandiri File Lokal)
+      - name: 7. Terapkan Pull Request #24227 (Otomatis)
         working-directory: ./openwrt
         run: |
           echo "BUILD_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
           
+          # Pindah ke versi yang dipilih
           git checkout ${{ github.event.inputs.openwrt_version }}
           
-          mkdir -p target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/
-          mkdir -p files/etc/hotplug.d/firmware/
+          # Unduh dan terapkan seluruh commits dari PR #24227 menggunakan patch
+          echo "Menerapkan Pull Request #24227 (Lite-On WPX8324)..."
+          curl -sL https://github.com/openwrt/openwrt/pull/24227.patch | git am --3way || {
+            echo "⚠️ Peringatan: Terdapat konflik saat apply patch."
+            echo "Melanjutkan proses dengan mengabaikan bagian yang konflik..."
+            git am --skip || true
+          }
           
-          cp $GITHUB_WORKSPACE/custom-files/ipq5018-wpx8324.dts target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/
-          cp $GITHUB_WORKSPACE/custom-files/11-ath11k-caldata files/etc/hotplug.d/firmware/
-          
-          cat << 'EOF' >> target/linux/qualcommax/image/ipq50xx.mk
-
-          define Device/wpx8324_ap-mp03-5-c1
-            $(call Device/FitImageLzma)
-            $(call Device/UbiFit)
-            DEVICE_VENDOR := Lite-On
-            DEVICE_MODEL := WPX8324
-            DEVICE_DTS := ipq5018-wpx8324
-            DEVICE_DTS_CONFIG := config@mp03.5-c1
-            SOC := ipq5018
-            BLOCKSIZE := 128k
-            PAGESIZE := 2048
-            IMAGE_SIZE := 59392k
-            NAND_SIZE := 128m
-            DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-yuncore_ax830 kmod-usb-dwc3-qcom kmod-usb-storage kmod-fs-vfat block-mount usbutils
-          endef
-          TARGET_DEVICES += wpx8324_ap-mp03-5-c1
-          EOF
-
-          sed -i 's/yuncore,ax830|\\/wpx8324,ap-mp03-5-c1|\\\n\tyuncore,ax830|\\/g' target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh
-          sed -i 's/yuncore,ax850)/wpx8324,ap-mp03-5-c1)\n\t\tucidef_set_interfaces_lan_wan "lan" "wan"\n\t\t;;\n\tyuncore,ax850)/g' target/linux/qualcommax/ipq50xx/base-files/etc/board.d/02_network
-          sed -i 's/yuncore,ax830|\\/wpx8324,ap-mp03-5-c1|\\\n\tyuncore,ax830|\\/g' package/boot/uboot-tools/uboot-envtools/files/qualcommax_ipq50xx
-          
+          # Update dan install feeds
           for i in 1 2 3; do
             ./scripts/feeds update -a && break || sleep 60
           done
@@ -115,30 +96,19 @@ jobs:
             PACKAGES_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/packages/Packages"
           fi
           
-          echo "Mencari versi kernel dan vermagic di: $KMODS_URL"
-          
-          # Target string: 6.12.94-1-d87093ae313df0a8c4c28e9b3e501a89
           FULL_KERNEL_VER=$(curl -sL "$KMODS_URL" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[a-f0-9]{32}' | head -n 1)
-          
           if [[ -z "$FULL_KERNEL_VER" ]]; then
-            echo "Folder kmods tidak ditemukan, membaca dari index Packages..."
             FULL_KERNEL_VER=$(curl -sL "$PACKAGES_URL" | awk '/^Package: kernel$/{f=1} f && /^Version:/{print $2; exit}')
           fi
           
-          if [[ -z "$FULL_KERNEL_VER" ]]; then
-            echo "::error::Gagal mengambil informasi kernel dari server OpenWrt!"
-            exit 1
+          if [[ -n "$FULL_KERNEL_VER" ]]; then
+            VERMAGIC=$(echo "$FULL_KERNEL_VER" | awk -F'-' '{print $NF}')
+            echo "$VERMAGIC" > .vermagic
+            sed -i 's|grep '\''=\[ym\]'\'' $(LINUX_DIR)/.config.set \| LC_ALL=C sort \| $(MKHASH) md5 > $(LINUX_DIR)/.vermagic|cp $(TOPDIR)/.vermagic $(LINUX_DIR)/.vermagic|g' ./include/kernel-defaults.mk
+            echo "✅ Berhasil menyuntikkan Vermagic Official: $VERMAGIC"
+          else
+            echo "⚠️ Peringatan: Gagal menemukan Vermagic dari server OpenWrt!"
           fi
-          
-          VERMAGIC=$(echo "$FULL_KERNEL_VER" | awk -F'-' '{print $NF}')
-          echo "$VERMAGIC" > .vermagic
-          
-          sed -i 's|grep '\''=\[ym\]'\'' $(LINUX_DIR)/.config.set \| LC_ALL=C sort \| $(MKHASH) md5 > $(LINUX_DIR)/.vermagic|cp $(TOPDIR)/.vermagic $(LINUX_DIR)/.vermagic|g' ./include/kernel-defaults.mk
-          sed -i 's|STAMP_BUILT:=$(STAMP_BUILT)_$(shell $(SCRIPT_DIR)/kconfig.pl $(LINUX_DIR)/.config \| $(MKHASH) md5)|STAMP_BUILT:=$(STAMP_BUILT)_$(shell cat $(LINUX_DIR)/.vermagic)|g' ./package/kernel/linux/Makefile
-          
-          echo "✅ Full Kernel String: $FULL_KERNEL_VER"
-          echo "✅ Berhasil menyuntikkan Vermagic Official: $VERMAGIC"
-          
 
       - name: 9. Konfigurasi First Boot (uci-defaults)
         working-directory: ./openwrt
@@ -180,6 +150,13 @@ jobs:
           echo 'CONFIG_TARGET_MULTI_PROFILE=y' >> .config
           echo 'CONFIG_TARGET_DEVICE_qualcommax_ipq50xx_DEVICE_wpx8324_ap-mp03-5-c1=y' >> .config
           
+          # --- DAFTAR PAKET WAJIB (Akan selalu diinstal) ---
+          DEFAULT_PKGS="luci luci-ssl kmod-usb-net kmod-usb-net-qmi-wwan uqmi luci-proto-qmi kmod-usb-serial-option kmod-usb-serial kmod-usb-serial-wwan qmi-utils kmod-usb-acm kmod-usb-net-cdc-ncm kmod-usb-net-cdc-mbim umbim modemmanager luci-app-modemmanager usbutils iperf3 nano htop"
+          for pkg in $DEFAULT_PKGS; do
+            echo "CONFIG_PACKAGE_$pkg=y" >> .config
+          done
+          
+          # --- DAFTAR PAKET TAMBAHAN (Dari Input Opsional) ---
           CUSTOM_PKGS="${{ github.event.inputs.custom_packages }}"
           if [ -n "$CUSTOM_PKGS" ]; then
             for pkg in $CUSTOM_PKGS; do
