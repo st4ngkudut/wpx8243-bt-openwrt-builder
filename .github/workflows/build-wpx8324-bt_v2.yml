@@ -82,7 +82,7 @@ jobs:
           cp $GITHUB_WORKSPACE/custom-files/ipq5018-wpx8324.dts target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ || true
           cp $GITHUB_WORKSPACE/custom-files/11-ath11k-caldata files/etc/hotplug.d/firmware/ || true
           
-          CUSTOM_PKGS="${{ github.event.inputs.custom_packages }} -kmod-qrtr -kmod-qrtr-smd -kmod-qrtr-tun"
+          CUSTOM_PKGS="${{ github.event.inputs.custom_packages }}"
           
           # Tambahkan Device Profile WPX8324
           cat << EOF >> target/linux/qualcommax/image/ipq50xx.mk
