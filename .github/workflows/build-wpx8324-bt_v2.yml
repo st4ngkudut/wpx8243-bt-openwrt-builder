@@ -72,6 +72,7 @@ jobs:
           
           cp $GITHUB_WORKSPACE/custom-files/ipq5018-wpx8324.dts target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/
           cp $GITHUB_WORKSPACE/custom-files/11-ath11k-caldata files/etc/hotplug.d/firmware/
+          chmod +x files/etc/hotplug.d/firmware/11-ath11k-caldata
           
           # Memasukkan input custom_packages langsung ke dalam DEVICE_PACKAGES agar wajib terinstal
           cat << EOF >> target/linux/qualcommax/image/ipq50xx.mk
