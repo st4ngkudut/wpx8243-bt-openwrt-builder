@@ -137,16 +137,20 @@ jobs:
           sed -i 's|grep '\''=\[ym\]'\'' $(LINUX_DIR)/.config.set \| LC_ALL=C sort \| $(MKHASH) md5 > $(LINUX_DIR)/.vermagic|cp $(TOPDIR)/.vermagic $(LINUX_DIR)/.vermagic|g' ./include/kernel-defaults.mk
           sed -i 's|STAMP_BUILT:=$(STAMP_BUILT)_$(shell $(SCRIPT_DIR)/kconfig.pl $(LINUX_DIR)/.config \| $(MKHASH) md5)|STAMP_BUILT:=$(STAMP_BUILT)_$(shell cat $(LINUX_DIR)/.vermagic)|g' ./package/kernel/linux/Makefile
           
-          # ---> INJEKSI LANGSUNG KE TEMPLATE DISTFEEDS OPENWRT <---
-          # Hapus template kmods bawaan yang biasanya dinonaktifkan (di-comment)
-          sed -i '/kmods/d' repositories.conf
-          # Tulis URL kmods vermagic langsung ke template (Mendukung OPKG maupun APK)
-          echo "src/gz openwrt_kmods ${KMODS_URL}${FULL_KERNEL_VER}" >> repositories.conf
-          echo "${KMODS_URL}${FULL_KERNEL_VER}" >> repositories.conf
+          # ---> PERBAIKAN: TANAM LANGSUNG KE ROOTFS FIRMWARE <---
+          # Kita buatkan foldernya agar otomatis masuk ke dalam router saat selesai build
+          mkdir -p files/etc/apk/repositories.d/
+          mkdir -p files/etc/opkg/
+          
+          # Tulis URL kmods resmi untuk sistem APK (OpenWrt baru)
+          echo "${KMODS_URL}${FULL_KERNEL_VER}" > files/etc/apk/repositories.d/official-kmods.list
+          
+          # Tulis URL kmods resmi untuk sistem OPKG (OpenWrt lawas)
+          echo "src/gz openwrt_kmods ${KMODS_URL}${FULL_KERNEL_VER}" > files/etc/opkg/customfeeds.conf
           
           echo "✅ Full Kernel String: $FULL_KERNEL_VER"
           echo "✅ Berhasil menyuntikkan Vermagic Official: $VERMAGIC"
-          echo "✅ Link Kmods langsung dimasukkan ke repositories.conf"
+          echo "✅ Link Kmods permanen ditanam ke dalam Firmware"
 
       - name: 9. Konfigurasi First Boot (uci-defaults)
         working-directory: ./openwrt
