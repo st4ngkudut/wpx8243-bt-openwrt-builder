@@ -71,8 +71,8 @@ jobs:
           mkdir -p files/etc/hotplug.d/firmware/
           
           cp $GITHUB_WORKSPACE/custom-files/ipq5018-wpx8324.dts target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/
-          cp $GITHUB_WORKSPACE/custom-files/11-ath11k-caldata files/etc/hotplug.d/firmware/
-          chmod +x files/etc/hotplug.d/firmware/11-ath11k-caldata
+          #cp $GITHUB_WORKSPACE/custom-files/11-ath11k-caldata files/etc/hotplug.d/firmware/
+          #chmod +x files/etc/hotplug.d/firmware/11-ath11k-caldata
           
           # Memasukkan input custom_packages langsung ke dalam DEVICE_PACKAGES agar wajib terinstal
           cat << EOF >> target/linux/qualcommax/image/ipq50xx.mk
@@ -89,7 +89,7 @@ jobs:
             PAGESIZE := 2048
             IMAGE_SIZE := 59392k
             NAND_SIZE := 128m
-            DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-yuncore_ax830 kmod-ath11k-pci kmod-usb-dwc3-qcom kmod-usb-storage kmod-fs-vfat block-mount usbutils ${{ github.event.inputs.custom_packages }}
+            DEVICE_PACKAGES := ath11k-firmware-ipq5018 ath11k-firmware-ipq5018-qcn6122 ipq-wifi-yuncore_ax830 kmod-ath11k-pci kmod-usb-dwc3-qcom kmod-usb-storage kmod-fs-vfat block-mount usbutils ${{ github.event.inputs.custom_packages }}
           endef
           TARGET_DEVICES += wpx8324_ap-mp03-5-c1
           EOF
@@ -213,6 +213,7 @@ jobs:
               fi
             done
           fi
+          sort -u .config -o .config
           
           make defconfig
 
