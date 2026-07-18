@@ -189,12 +189,14 @@ jobs:
             wget "https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/config.buildinfo" -O .config
           fi
           
-          # 2. Matikan opsi "Build Everything" agar compile tidak memakan waktu berjam-jam
-          sed -i 's/CONFIG_TARGET_ALL_PROFILES=y/# CONFIG_TARGET_ALL_PROFILES is not set/g' .config
-          sed -i 's/CONFIG_ALL_KMODS=y/# CONFIG_ALL_KMODS is not set/g' .config
-          sed -i 's/CONFIG_ALL_NONSHARED=y/# CONFIG_ALL_NONSHARED is not set/g' .config
+          # 2. SAPU BERSIH perangkat lain dan fitur "Build Everything" dari server
+          sed -i '/CONFIG_TARGET_DEVICE_/d' .config
+          sed -i '/CONFIG_TARGET_ALL_PROFILES/d' .config
+          sed -i '/CONFIG_ALL_KMODS/d' .config
+          sed -i '/CONFIG_ALL_NONSHARED/d' .config
+          sed -i '/CONFIG_BUILDBOT/d' .config
           
-          # 3. Aktifkan CCACHE dan Profil WPX8324 saja
+          # 3. Aktifkan CCACHE dan Profil WPX8324 SAJA
           echo 'CONFIG_CCACHE=y' >> .config
           echo 'CONFIG_TARGET_DEVICE_qualcommax_ipq50xx_DEVICE_wpx8324_ap-mp03-5-c1=y' >> .config
           
@@ -213,8 +215,8 @@ jobs:
               fi
             done
           fi
-          sort -u .config -o .config
           
+          sort -u .config -o .config
           make defconfig
 
       - name: 11. Mulai Proses Build
