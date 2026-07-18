@@ -176,15 +176,44 @@ jobs:
           EOF
           chmod +x files/etc/uci-defaults/99-custom-settings
 
-      - name: 10. Terapkan Konfigurasi Kustom
+      - name: 10. Terapkan Konfigurasi Kustom & Blueprint Resmi
         working-directory: ./openwrt
         run: |
-          echo 'CONFIG_CCACHE=y' > .config
-          echo 'CONFIG_TARGET_qualcommax=y' >> .config
-          echo 'CONFIG_TARGET_qualcommax_ipq50xx=y' >> .config
-          echo '# CONFIG_TARGET_qualcommax_ipq807x is not set' >> .config
-          echo 'CONFIG_TARGET_MULTI_PROFILE=y' >> .config
+          # 1. Unduh blueprint asli (config.buildinfo) dari server OpenWrt
+          VERSION="${{ github.event.inputs.openwrt_version }}"
+          VERSION_NUM=$(echo "$VERSION" | sed 's/^v//')
+          
+          if [[ "$VERSION" != "snapshot" ]]; then
+            wget "https://downloads.openwrt.org/releases/${VERSION_NUM}/targets/qualcommax/ipq50xx/config.buildinfo" -O .config
+          else
+            wget "https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/config.buildinfo" -O .config
+          fi
+          
+          # 2. Matikan opsi "Build Everything" agar compile tidak memakan waktu berjam-jam
+          sed -i 's/CONFIG_TARGET_ALL_PROFILES=y/# CONFIG_TARGET_ALL_PROFILES is not set/g' .config
+          sed -i 's/CONFIG_ALL_KMODS=y/# CONFIG_ALL_KMODS is not set/g' .config
+          sed -i 's/CONFIG_ALL_NONSHARED=y/# CONFIG_ALL_NONSHARED is not set/g' .config
+          
+          # 3. Aktifkan CCACHE dan Profil WPX8324 saja
+          echo 'CONFIG_CCACHE=y' >> .config
           echo 'CONFIG_TARGET_DEVICE_qualcommax_ipq50xx_DEVICE_wpx8324_ap-mp03-5-c1=y' >> .config
+          
+          # 4. Inject Paket Mandatory & Custom
+          MANDATORY_PKGS="luci luci-ssl kmod-mii kmod-usb-net kmod-usb-wdm kmod-usb-net-qmi-wwan uqmi luci-proto-qmi kmod-usb-net-cdc-ether kmod-usb-serial-option kmod-usb-serial kmod-usb-serial-wwan qmi-utils kmod-usb-serial-qualcomm kmod-usb-acm kmod-usb-net-cdc-ncm kmod-usb-net-cdc-mbim umbim modemmanager luci-proto-modemmanager usbutils iperf3 usb-modeswitch kmod-usb-net-rndis nano htop pv openssh-sftp-server"
+          EXTRA_PKGS="${{ github.event.inputs.custom_packages }}"
+          ALL_PKGS="$MANDATORY_PKGS $EXTRA_PKGS"
+          
+          if [ -n "$ALL_PKGS" ]; then
+            for pkg in $ALL_PKGS; do
+              if [[ $pkg == -* ]]; then
+                clean_pkg="${pkg#-}"
+                echo "# CONFIG_PACKAGE_$clean_pkg is not set" >> .config
+              else
+                echo "CONFIG_PACKAGE_$pkg=y" >> .config
+              fi
+            done
+          fi
+          
           make defconfig
 
       - name: 11. Mulai Proses Build
