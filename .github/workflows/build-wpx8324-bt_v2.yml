@@ -236,7 +236,7 @@ jobs:
           CCACHE_DIR: ${{ github.workspace }}/openwrt/.ccache
           USE_CCACHE: 1
         run: |
-          make -j$(nproc) -C openwrt download V=s
+          make -j$(nproc) -C openwrt download
           make -j$(nproc) -C openwrt world
 
       - name: 12. Unggah Artefak Build
