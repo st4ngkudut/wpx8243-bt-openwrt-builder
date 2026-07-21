@@ -29,43 +29,9 @@ jobs:
       - name: 1. Checkout Kode Repositori
         uses: actions/checkout@v4
 
-      - name: 2. Siapkan Variabel Build & Ambil Vermagic
-        id: build_vars
-        run: |
-          VERSION="${{ github.event.inputs.openwrt_version }}"
-          VERSION_NUM=$(echo "$VERSION" | sed 's/^v//')
-          
-          echo "BUILD_VERSION=$VERSION" >> $GITHUB_ENV
-          
-          if [[ "$VERSION" != "snapshot" ]]; then
-            KMODS_URL="https://downloads.openwrt.org/releases/${VERSION_NUM}/targets/qualcommax/ipq50xx/kmods/"
-            PACKAGES_URL="https://downloads.openwrt.org/releases/${VERSION_NUM}/targets/qualcommax/ipq50xx/packages/Packages"
-          else
-            KMODS_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/kmods/"
-            PACKAGES_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/packages/Packages"
-          fi
-          
-          FULL_KERNEL_VER=$(curl -sL "$KMODS_URL" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[a-f0-9]{32}' | head -n 1)
-          
-          if [[ -z "$FULL_KERNEL_VER" ]]; then
-            FULL_KERNEL_VER=$(curl -sL "$PACKAGES_URL" | awk '/^Package: kernel$/{f=1} f && /^Version:/{print $2; exit}')
-          fi
-          
-          if [[ -z "$FULL_KERNEL_VER" ]]; then
-            echo "::error::Gagal mengambil informasi kernel dari server OpenWrt."
-            exit 1
-          fi
-          
-          VERMAGIC=$(echo "$FULL_KERNEL_VER" | awk -F'-' '{print $NF}')
-          KERNEL_BASE=$(echo "$FULL_KERNEL_VER" | cut -d'-' -f1)
-          KERNEL_MAJOR_MINOR=$(echo "$KERNEL_BASE" | cut -d'.' -f1,2)
-          KERNEL_CONFIG="config-${KERNEL_MAJOR_MINOR}"
-          
-          echo "vermagic=$VERMAGIC" >> $GITHUB_OUTPUT
-          echo "kernel_config=$KERNEL_CONFIG" >> $GITHUB_OUTPUT
-          echo "full_kernel_ver=$FULL_KERNEL_VER" >> $GITHUB_OUTPUT
-          echo "kmods_url=$KMODS_URL" >> $GITHUB_OUTPUT
-
+      - name: 2. SKIP THIS STEP
+        uses: actions/checkout@v4
+        
       - name: 3. Kosongkan Ruang Disk
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
@@ -89,9 +55,9 @@ jobs:
           path: |
             openwrt/dl
             openwrt/.ccache
-          key: ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v118
+          key: ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v1
           restore-keys: |
-            ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v118-
+            ${{ runner.os }}-openwrt-qualcommax-${{ github.event.inputs.openwrt_version }}-v1-
 
       - name: 7. Injeksi Kode (Jalur Mandiri File Lokal)
         working-directory: ./openwrt
