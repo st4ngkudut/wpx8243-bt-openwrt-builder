@@ -1,4 +1,4 @@
-name: 'Build OpenWrt WPX8324-BT v2 (Refactored Vermagic)'
+name: 'Build OpenWrt WPX8324-BT v2'
 
 permissions:
   contents: write
@@ -29,17 +29,14 @@ jobs:
       - name: 1. Checkout Kode Repositori
         uses: actions/checkout@v4
 
-      # --- INI ADALAH METODE VERMAGIC DARI WORKFLOW KEDUA (DIADAPTASI) ---
       - name: 2. Siapkan Variabel Build & Ambil Vermagic
         id: build_vars
         run: |
           VERSION="${{ github.event.inputs.openwrt_version }}"
           VERSION_NUM=$(echo "$VERSION" | sed 's/^v//')
           
-          # Simpan BUILD_VERSION untuk tag release nanti
           echo "BUILD_VERSION=$VERSION" >> $GITHUB_ENV
           
-          # Tentukan URL direktori kmods untuk qualcommax/ipq50xx
           if [[ "$VERSION" != "snapshot" ]]; then
             KMODS_URL="https://downloads.openwrt.org/releases/${VERSION_NUM}/targets/qualcommax/ipq50xx/kmods/"
             PACKAGES_URL="https://downloads.openwrt.org/releases/${VERSION_NUM}/targets/qualcommax/ipq50xx/packages/Packages"
@@ -48,14 +45,9 @@ jobs:
             PACKAGES_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/packages/Packages"
           fi
           
-          echo "Mencari versi kernel dan vermagic di: $KMODS_URL"
-          
-          # Ambil nama folder dari halaman index kmods menggunakan regex
           FULL_KERNEL_VER=$(curl -sL "$KMODS_URL" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[a-f0-9]{32}' | head -n 1)
           
-          # Fallback ke metode lama (file Packages) jika folder kmods tidak ditemukan
           if [[ -z "$FULL_KERNEL_VER" ]]; then
-            echo "Folder kmods tidak ditemukan, mencoba membaca dari index Packages lama..."
             FULL_KERNEL_VER=$(curl -sL "$PACKAGES_URL" | awk '/^Package: kernel$/{f=1} f && /^Version:/{print $2; exit}')
           fi
           
@@ -64,22 +56,15 @@ jobs:
             exit 1
           fi
           
-          # Ekstrak vermagic dan tentukan config kernel
           VERMAGIC=$(echo "$FULL_KERNEL_VER" | awk -F'-' '{print $NF}')
           KERNEL_BASE=$(echo "$FULL_KERNEL_VER" | cut -d'-' -f1)
           KERNEL_MAJOR_MINOR=$(echo "$KERNEL_BASE" | cut -d'.' -f1,2)
           KERNEL_CONFIG="config-${KERNEL_MAJOR_MINOR}"
           
-          # Simpan sebagai output GitHub Actions
           echo "vermagic=$VERMAGIC" >> $GITHUB_OUTPUT
           echo "kernel_config=$KERNEL_CONFIG" >> $GITHUB_OUTPUT
           echo "full_kernel_ver=$FULL_KERNEL_VER" >> $GITHUB_OUTPUT
           echo "kmods_url=$KMODS_URL" >> $GITHUB_OUTPUT
-          
-          echo "✅ Target Version: $VERSION"
-          echo "✅ Full Kernel String: $FULL_KERNEL_VER"
-          echo "✅ Kernel Config Target: $KERNEL_CONFIG"
-          echo "✅ Vermagic: $VERMAGIC"
 
       - name: 3. Kosongkan Ruang Disk
         run: |
@@ -148,18 +133,25 @@ jobs:
           done
           ./scripts/feeds install -a
 
-      # --- INI ADALAH PENERAPAN VERMAGIC MENGGUNAKAN OUTPUT DARI LANGKAH 2 ---
-      - name: 8. Terapkan Vermagic Kernel
+      - name: 8. Terapkan Vermagic Kernel (Paranoia Mode)
         working-directory: ./openwrt
         run: |
-          # Ambil vermagic dari output Langkah 2
-          echo "${{ steps.build_vars.outputs.vermagic }}" > .vermagic
+          echo -n "${{ steps.build_vars.outputs.vermagic }}" > .vermagic
           
-          # Paksa OpenWrt Makefile untuk menggunakan vermagic kita
-          sed -i 's|grep '\''=\[ym\]'\'' $(LINUX_DIR)/.config.set \| LC_ALL=C sort \| $(MKHASH) md5 > $(LINUX_DIR)/.vermagic|cp $(TOPDIR)/.vermagic $(LINUX_DIR)/.vermagic|g' ./include/kernel-defaults.mk
-          sed -i 's|STAMP_BUILT:=$(STAMP_BUILT)_$(shell $(SCRIPT_DIR)/kconfig.pl $(LINUX_DIR)/.config \| $(MKHASH) md5)|STAMP_BUILT:=$(STAMP_BUILT)_$(shell cat $(LINUX_DIR)/.vermagic)|g' ./package/kernel/linux/Makefile
+          sed -i 's/.*grep '\''=\[ym\]'\'' $(LINUX_DIR)\/.config\.set.*/\tcp $(TOPDIR)\/.vermagic $(LINUX_DIR)\/.vermagic/g' include/kernel-defaults.mk
           
-          # Injeksi URL kmods resmi agar router bisa mendownload kmod dari server OpenWrt (apk & opkg)
+          if ! grep -q "cp \$(TOPDIR)/.vermagic \$(LINUX_DIR)/.vermagic" include/kernel-defaults.mk; then
+            echo "::error::Injeksi include/kernel-defaults.mk GAGAL!"
+            exit 1
+          fi
+          
+          sed -i 's/.*kconfig\.pl $(LINUX_DIR)\/.config.*/STAMP_BUILT:=$(STAMP_BUILT)_$(shell cat $(LINUX_DIR)\/.vermagic)/g' package/kernel/linux/Makefile
+          
+          if ! grep -q "shell cat \$(LINUX_DIR)/.vermagic" package/kernel/linux/Makefile; then
+            echo "::error::Injeksi package/kernel/linux/Makefile GAGAL!"
+            exit 1
+          fi
+          
           mkdir -p files/etc/apk/repositories.d/
           mkdir -p files/etc/opkg/
           echo "${{ steps.build_vars.outputs.kmods_url }}${{ steps.build_vars.outputs.full_kernel_ver }}" > files/etc/apk/repositories.d/official-kmods.list
