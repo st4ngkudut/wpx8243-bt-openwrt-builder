@@ -20,7 +20,7 @@ on:
         description: 'Daftar Paket Tambahan (Gunakan tanda minus "-" untuk menghapus paket)'
         required: false
         type: string
-        default: 'luci luci-ssl kmod-mii kmod-usb-net kmod-usb-wdm kmod-usb-net-qmi-wwan uqmi luci-proto-qmi kmod-usb-net-cdc-ether kmod-usb-serial-option kmod-usb-serial kmod-usb-serial-wwan qmi-utils kmod-usb-serial-qualcomm kmod-usb-acm kmod-usb-net-cdc-ncm kmod-usb-net-cdc-mbim umbim modemmanager luci-proto-modemmanager usbutils iperf3 usb-modeswitch kmod-usb-net-rndis nano htop pv openssh-sftp-server'
+        default: ''
 
 jobs:
   build:
@@ -71,10 +71,7 @@ jobs:
           mkdir -p files/etc/hotplug.d/firmware/
           
           cp $GITHUB_WORKSPACE/custom-files/ipq5018-wpx8324.dts target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/
-          #cp $GITHUB_WORKSPACE/custom-files/11-ath11k-caldata files/etc/hotplug.d/firmware/
-          #chmod +x files/etc/hotplug.d/firmware/11-ath11k-caldata
           
-          # Memasukkan input custom_packages langsung ke dalam DEVICE_PACKAGES agar wajib terinstal
           cat << EOF >> target/linux/qualcommax/image/ipq50xx.mk
 
           define Device/wpx8324_ap-mp03-5-c1
@@ -103,7 +100,7 @@ jobs:
           done
           ./scripts/feeds install -a
 
-      - name: 8. Sinkronisasi Vermagic Kernel (Aman untuk APK)
+      - name: 8. Sinkronisasi Vermagic Kernel
         working-directory: ./openwrt
         run: |
           VERSION="${{ github.event.inputs.openwrt_version }}"
@@ -117,17 +114,13 @@ jobs:
             PACKAGES_URL="https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/packages/Packages"
           fi
           
-          echo "Mencari versi kernel dan vermagic di: $KMODS_URL"
-          
           FULL_KERNEL_VER=$(curl -sL "$KMODS_URL" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[a-f0-9]{32}' | head -n 1)
           
           if [[ -z "$FULL_KERNEL_VER" ]]; then
-            echo "Folder kmods tidak ditemukan, membaca dari index Packages..."
             FULL_KERNEL_VER=$(curl -sL "$PACKAGES_URL" | awk '/^Package: kernel$/{f=1} f && /^Version:/{print $2; exit}')
           fi
           
           if [[ -z "$FULL_KERNEL_VER" ]]; then
-            echo "::error::Gagal mengambil informasi kernel dari server OpenWrt!"
             exit 1
           fi
           
@@ -137,16 +130,11 @@ jobs:
           sed -i 's|grep '\''=\[ym\]'\'' $(LINUX_DIR)/.config.set \| LC_ALL=C sort \| $(MKHASH) md5 > $(LINUX_DIR)/.vermagic|cp $(TOPDIR)/.vermagic $(LINUX_DIR)/.vermagic|g' ./include/kernel-defaults.mk
           sed -i 's|STAMP_BUILT:=$(STAMP_BUILT)_$(shell $(SCRIPT_DIR)/kconfig.pl $(LINUX_DIR)/.config \| $(MKHASH) md5)|STAMP_BUILT:=$(STAMP_BUILT)_$(shell cat $(LINUX_DIR)/.vermagic)|g' ./package/kernel/linux/Makefile
           
-          # TANAM LANGSUNG LINK KMOD KE ROOTFS FIRMWARE
           mkdir -p files/etc/apk/repositories.d/
           mkdir -p files/etc/opkg/
           
           echo "${KMODS_URL}${FULL_KERNEL_VER}" > files/etc/apk/repositories.d/official-kmods.list
           echo "src/gz openwrt_kmods ${KMODS_URL}${FULL_KERNEL_VER}" > files/etc/opkg/customfeeds.conf
-          
-          echo "✅ Full Kernel String: $FULL_KERNEL_VER"
-          echo "✅ Berhasil menyuntikkan Vermagic Official: $VERMAGIC"
-          echo "✅ Link Kmods permanen ditanam ke dalam Firmware"
 
       - name: 9. Konfigurasi First Boot (uci-defaults)
         working-directory: ./openwrt
@@ -159,7 +147,6 @@ jobs:
           uci set system.@system[0].hostname='WPX8324-BT'
           uci commit system
           
-          # Hapus config wireless lama dan generate ulang agar 5GHz PCIe terdeteksi
           rm -f /etc/config/wireless
           wifi config
           
@@ -196,7 +183,6 @@ jobs:
             wget "https://downloads.openwrt.org/snapshots/targets/qualcommax/ipq50xx/config.buildinfo" -O .config
           fi
           
-          # SAPU BERSIH fitur bawaan server yang memberatkan (SDK, ImageBuilder, profil device lain)
           sed -i '/CONFIG_TARGET_DEVICE_/d' .config
           sed -i '/CONFIG_TARGET_ALL_PROFILES/d' .config
           sed -i '/CONFIG_ALL_KMODS/d' .config
@@ -207,11 +193,9 @@ jobs:
           sed -i '/CONFIG_MAKE_TOOLCHAIN/d' .config
           sed -i '/CONFIG_JSON_CYCLONEDX_SBOM/d' .config
           
-          # Aktifkan CCACHE dan Profil WPX8324 SAJA
           echo 'CONFIG_CCACHE=y' >> .config
           echo 'CONFIG_TARGET_DEVICE_qualcommax_ipq50xx_DEVICE_wpx8324_ap-mp03-5-c1=y' >> .config
           
-          # Inject Paket Mandatory & Custom
           MANDATORY_PKGS="luci luci-ssl kmod-mii kmod-usb-net kmod-usb-wdm kmod-usb-net-qmi-wwan uqmi luci-proto-qmi kmod-usb-net-cdc-ether kmod-usb-serial-option kmod-usb-serial kmod-usb-serial-wwan qmi-utils kmod-usb-serial-qualcomm kmod-usb-acm kmod-usb-net-cdc-ncm kmod-usb-net-cdc-mbim umbim modemmanager luci-proto-modemmanager usbutils iperf3 usb-modeswitch kmod-usb-net-rndis nano htop pv openssh-sftp-server"
           EXTRA_PKGS="${{ github.event.inputs.custom_packages }}"
           ALL_PKGS="$MANDATORY_PKGS $EXTRA_PKGS"
